@@ -1,6 +1,6 @@
 CC ?= cc
 CFLAGS ?= -Os
-CPPLAGS += -pedantic -Wall -Wextra
+CPPFLAGS += -pedantic -Wall -Wextra
 
 DESTDIR ?= /usr/local
 

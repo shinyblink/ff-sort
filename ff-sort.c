@@ -74,6 +74,8 @@ static void ffparse(FILE* food, FILE* out, uint32_t* w, uint32_t* h) {
 	spew(out, buf, 8);
 }
 
+// Global crap.
+uint32_t w, h;
 
 // Selection options
 static int options;
@@ -139,13 +141,43 @@ static int comp(const void* e1, const void* e2) {
 	}
 }
 
-static inline void sort(pixel* pixels, int amount) {
-	qsort(pixels, amount, sizeof(pixel), comp);
+static inline void sort(pixel* queue, int amount, uint16_t* img, int x, int y) {
+	if (!amount)
+		return;
+
+	qsort(queue, amount, sizeof(pixel), comp);
+
+	int i;
+	for (i = 0; i < amount; i++) {
+		int p = ((options == SEL_X) ? PPOS((x - amount + i), y) : PPOS(x, (y - amount + i))) * 4;
+		COPY4(queue[i].orig, 0, img, p);
+	}
+}
+
+static inline void compare(int x, int y, uint16_t* img, pixel* queue, int* amount, pixel* current, pixel* px_min, pixel* px_max) {
+	int p = PPOS(x, y) * 4;
+	COPY4(img, p, current->orig, 0);
+#ifdef DOCONVERT
+	uint16_t conv[4];
+	qbeush2ush(current->orig, conv);
+	qush2fp(conv, current->px);
+#else
+	qush2fp(current->orig, current->px);
+#endif
+	if (hsv) {
+		rgb2hsv(current->px, current->px);
+	}
+	if ((comp(current, px_min) >= 0) && (comp(current, px_max) < 1)) {
+		// fits in selection scheme
+		queue[(*amount)++] = *current;
+	} else {
+		sort(queue, *amount, img, x, y);
+		*amount = 0;
+	}
 }
 
 static int do_stuff(void) {
 	// parse input image
-	uint32_t w, h;
 	ffparse(stdin, stdout, &w, &h);
 
 	uint16_t* img = malloc(w * h * 8);
@@ -170,49 +202,27 @@ static int do_stuff(void) {
 	chew(stdin, img, w * h * 8);
 
 	// process
-	uint16_t conv[4];
 	pixel current;
-	int x, y, i;
-	if (options == SEL_X)
+	unsigned int x, y;
+	if (options == SEL_X) {
 		for (y = 0; y < h; y++) {
 			int amount = 0;
-			for (x = 0; x < w; x++) {
-				int p = PPOS(x, y) * 4;
-				COPY4(img, p, current.orig, 0);
-#ifdef DOCONVERT
-				qbeush2ush(current.orig, conv);
-				qush2fp(conv, current.px);
-#else
-				qush2fp(current.orig, current.px);
-#endif
-				if (hsv) {
-					rgb2hsv(current.px, current.px);
-				}
-				if ((comp(&current, &px_min) >= 0) && (comp(&current, &px_max) < 1)) {
-					// fits in selection scheme
-					queue[amount++] = current;
-				} else {
-					if (amount) {
-						sort(queue, amount);
-						for (i = 0; i < amount; i++) {
-							int p = PPOS((x - amount + i), y) * 4;
-							COPY4(queue[i].orig, 0, img, p);
-						}
-					}
-					amount = 0;
-				}
-			}
-			if (amount) {
-				sort(queue, amount);
-				for (i = 0; i < amount; i++) {
-					int p = PPOS((w - amount + i), y) * 4;
-					COPY4(queue[i].orig, 0, img, p);
-				}
-			}
+			for (x = 0; x < w; x++)
+				compare(x, y, img, queue, &amount, &current, &px_min, &px_max);
+			sort(queue, amount, img, w, y);
 		}
+	} else {
+		for (x = 0; x < w; x++) {
+			int amount = 0;
+			for (y = 0; y < h; y++)
+				compare(x, y, img, queue, &amount, &current, &px_min, &px_max);
+			sort(queue, amount, img, x, h);
+		}
+	}
 
 	spew(stdout, img, w * h * 8);
 	fflush(stdout);
+	return 0;
 }
 
 // entry point.
