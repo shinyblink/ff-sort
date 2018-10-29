@@ -1,8 +1,14 @@
+# ff-sort
+# change this...
 CC ?= cc
 CFLAGS ?= -Os
 CPPFLAGS += -pedantic -Wall -Wextra
+FARBHERD=1
 
 DESTDIR ?= /usr/local
+
+# but not this..
+CPPFLAGS += -DFARBHERD=$(FARBHERD)
 
 BINS=ff-sort
 all: $(BINS)

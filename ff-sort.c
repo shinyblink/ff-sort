@@ -14,6 +14,10 @@
 #include <fcntl.h>
 #include <getopt.h>
 
+#if FARBHERD == 1
+#include <farbherd.h>
+#endif
+
 #include "conversion.h"
 
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
@@ -21,10 +25,12 @@
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define PPOS(x, y) (x + (y*w))
 #define COPY4(src, srci, dst, dsti)							\
-	dst[dsti + 0] = src[srci + 0];								\
-	dst[dsti + 1] = src[srci + 1];								\
-	dst[dsti + 2] = src[srci + 2];								\
-	dst[dsti + 3] = src[srci + 3]									\
+	if (src != dst) { \
+		dst[dsti + 0] = src[srci + 0];							\
+		dst[dsti + 1] = src[srci + 1];							\
+		dst[dsti + 2] = src[srci + 2];							\
+		dst[dsti + 3] = src[srci + 3];							\
+	}
 
 static void usage(char* self, int status) {
 	eprintf("Usage: <farbfeld source> | %s [-x|-y] [-t type] [-l min] [-u max] [type] [args..] | <farbfeld sink>\n", self);
@@ -75,14 +81,15 @@ static void ffparse(FILE* food, FILE* out, uint32_t* w, uint32_t* h) {
 }
 
 // Global crap.
-uint32_t w, h;
+static uint32_t w, h;
+static int farbherd = 0;
 
 // Selection options
 static int options;
 #define SEL_X 0
 #define SEL_Y 1
 
-static int detection;
+static int detection = 0;
 #define SEL_BRUTE 0
 #define SEL_EDGES 1 // soon.
 
@@ -150,7 +157,8 @@ static inline void sort(pixel* queue, int amount, uint16_t* img, int x, int y) {
 	int i;
 	for (i = 0; i < amount; i++) {
 		int p = ((options == SEL_X) ? PPOS((x - amount + i), y) : PPOS(x, (y - amount + i))) * 4;
-		COPY4(queue[i].orig, 0, img, p);
+		int op = (dir == DIR_NORMAL) ? i : (amount - i);
+		COPY4(queue[op].orig, 0, img, p);
 	}
 }
 
@@ -176,7 +184,43 @@ static inline void compare(int x, int y, uint16_t* img, pixel* queue, int* amoun
 	}
 }
 
-static int do_stuff(void) {
+static void sort_img(uint16_t* img, uint16_t* out, pixel* queue, uint32_t w, uint32_t h) {
+	pixel px_min;
+	pixel px_max;
+	px_min.px[0] = min; px_min.px[1] = min;
+	px_min.px[2] = min; px_min.px[3] = min;
+	px_max.px[0] = max; px_max.px[1] = max;
+	px_max.px[2] = max; px_max.px[3] = max;
+
+	if (img != out) {
+		memcpy(out, img, w * h * 8);
+	}
+
+	// process
+	pixel current;
+	unsigned int x, y;
+	if (options == SEL_X) {
+		for (y = 0; y < h; y++) {
+			int amount = 0;
+			for (x = 0; x < w; x++) {
+				//COPY4(img, PPOS(x, y) * 4, out, PPOS(x, y) * 4);
+				compare(x, y, out, queue, &amount, &current, &px_min, &px_max);
+			}
+			sort(queue, amount, out, w, y);
+		}
+	} else {
+		for (x = 0; x < w; x++) {
+			int amount = 0;
+			for (y = 0; y < h; y++) {
+				//COPY4(img, PPOS(x, y) * 4, out, PPOS(x, y) * 4);
+				compare(x, y, out, queue, &amount, &current, &px_min, &px_max);
+			}
+			sort(queue, amount, out, x, h);
+		}
+	}
+}
+
+static int nom_farbfeld(void) {
 	// parse input image
 	ffparse(stdin, stdout, &w, &h);
 
@@ -192,38 +236,62 @@ static int do_stuff(void) {
 		return 2;
 	}
 
-	pixel px_min;
-	pixel px_max;
-	px_min.px[0] = min; px_min.px[1] = min;
-	px_min.px[2] = min; px_min.px[3] = min;
-	px_max.px[0] = max; px_max.px[1] = max;
-	px_max.px[2] = max; px_max.px[3] = max;
-
 	chew(stdin, img, w * h * 8);
-
-	// process
-	pixel current;
-	unsigned int x, y;
-	if (options == SEL_X) {
-		for (y = 0; y < h; y++) {
-			int amount = 0;
-			for (x = 0; x < w; x++)
-				compare(x, y, img, queue, &amount, &current, &px_min, &px_max);
-			sort(queue, amount, img, w, y);
-		}
-	} else {
-		for (x = 0; x < w; x++) {
-			int amount = 0;
-			for (y = 0; y < h; y++)
-				compare(x, y, img, queue, &amount, &current, &px_min, &px_max);
-			sort(queue, amount, img, x, h);
-		}
-	}
-
+	sort_img(img, img, queue, w, h);
 	spew(stdout, img, w * h * 8);
 	fflush(stdout);
 	return 0;
 }
+
+#if FARBHERD == 1
+static int nom_farbherd(void) {
+	farbherd_header_t head;
+	if (farbherd_read_farbherd_header(stdin, &head)) {
+		fprintf(stderr, "Failed to read farbherd header.\n");
+		return 1;
+	}
+	farbherd_write_farbherd_header(stdout, head);
+	fflush(stdout);
+
+	size_t datasize = farbherd_datasize(head.imageHead);
+	uint16_t* work = calloc(1, datasize);
+	uint16_t* input = calloc(1, datasize);
+	uint16_t* output = malloc(datasize);
+	if (!work || !input || !output) {
+		fprintf(stderr, "Failed to allocate work memory.\n");
+		return 1;
+	}
+
+	w = head.imageHead.width;
+	h = head.imageHead.height;
+
+	pixel* queue = calloc((options == SEL_X) ? w : h, sizeof(pixel));
+	if (!queue) {
+		fprintf(stderr, "Error: Failed to alloc sorting queue.\n");
+		return 2;
+	}
+
+	farbherd_frame_t inputframe;
+	if (farbherd_init_farbherd_frame(&inputframe, head)) {
+		fprintf(stderr, "Failed to allocate incoming frame memory\n");
+		return 1;
+	}
+
+	while (1) {
+		if (farbherd_read_farbherd_frame(stdin, &inputframe, head))
+			return 0;
+		farbherd_apply_delta(input, inputframe.deltas, datasize);
+
+		// do the sorting.
+		sort_img(input, output, queue, w, h);
+
+		farbherd_calc_apply_delta(work, output, datasize);
+		fwrite(output, datasize, 1, stdout);
+		fflush(stdout);
+	}
+	return 0;
+}
+#endif
 
 // entry point.
 int main(int argc, char* argv[]) {
@@ -232,7 +300,7 @@ int main(int argc, char* argv[]) {
 
 	// parse arguments
 	int opt;
-	while ((opt = getopt(argc, argv, "xyiu:l:t:")) != -1) {
+	while ((opt = getopt(argc, argv, "xyrhu:l:t:")) != -1) {
 		switch (opt) {
 		case 'x':
 			options = SEL_X;
@@ -241,8 +309,12 @@ int main(int argc, char* argv[]) {
 			options = SEL_Y;
 			break;
 
-		case 'i':
+		case 'r':
 			dir = DIR_REVERSE;
+			break;
+
+		case 'h':
+			farbherd = 1;
 			break;
 
 		case 'l':
@@ -280,5 +352,12 @@ int main(int argc, char* argv[]) {
 		usage(argv[0], 1);
 	}
 
-	return do_stuff();
+	if (farbherd) {
+#if FARBHERD == 1
+		return nom_farbherd();
+#endif
+		fprintf(stderr, "Farbherd is not supported in this build. :(\n");
+		return 2;
+	}
+	return nom_farbfeld();
 }
