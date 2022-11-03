@@ -3,9 +3,10 @@
 CC ?= cc
 CFLAGS ?= -Os
 CPPFLAGS += -pedantic -Wall -Wextra
-FARBHERD=1
+FARBHERD=0
 
-DESTDIR ?= /usr/local
+PREFIX ?= /usr/local
+DESTDIR ?= /
 
 # but not this..
 CPPFLAGS += -DFARBHERD=$(FARBHERD)
@@ -14,10 +15,11 @@ BINS=ff-sort
 all: $(BINS)
 
 ff-sort: ff-sort.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $^
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $^ -lm
 
 install: $(BINS)
-	install $(BINS) $(DESTDIR)/bin
+	install -d $(DESTDIR)/$(PREFIX)/bin
+	install $(BINS) $(DESTDIR)/$(PREFIX)/bin
 
 clean:
 	rm -f $(BINS)

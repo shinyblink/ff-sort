@@ -33,7 +33,12 @@
 	}
 
 static void usage(char* self, int status) {
-	eprintf("Usage: <farbfeld source> | %s [-x|-y] [-t type] [-l min] [-u max] [type] [args..] | <farbfeld sink>\n", self);
+	eprintf(
+		"Usage: <farbfeld source> | %s [-x|-y] [-l min] [-u max] type [args..] | <farbfeld sink>\n"
+		"Type is one of:\n"
+		"\tred/green/blue - color channel\n"
+		"\tsum - sum of the above\n"
+		"\thue/saturation/value - HSV\n", self);
 	exit(status);
 }
 
@@ -89,7 +94,6 @@ static int options;
 #define SEL_X 0
 #define SEL_Y 1
 
-static int detection = 0;
 #define SEL_BRUTE 0
 #define SEL_EDGES 1 // soon.
 
@@ -300,7 +304,7 @@ int main(int argc, char* argv[]) {
 
 	// parse arguments
 	int opt;
-	while ((opt = getopt(argc, argv, "xyrhu:l:t:")) != -1) {
+	while ((opt = getopt(argc, argv, "xyrhu:l:")) != -1) {
 		switch (opt) {
 		case 'x':
 			options = SEL_X;
